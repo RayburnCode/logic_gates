@@ -1,0 +1,43 @@
+[package]
+name = "riscv32i-sim"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dylan Rayburn"]
+description = "A RISC-V RV32I processor simulator with SystemVerilog-inspired design in Rust"
+keywords = ["riscv", "simulator", "cpu", "hardware", "isa"]
+categories = ["simulation", "hardware-support", "emulators"]
+
+[dependencies]
+# Core dependencies for bit manipulation and type safety
+bitvec = "1.0.1"           # Bit-addressable memory and bitfields
+modular-bitfield = "0.13.1" # Bitfield structs
+
+# Numeric operations
+num = "0.4.3"              # Numeric traits and types
+num-traits = "0.2"         # Trait implementations
+
+# Performance and utilities
+once_cell = "1.19"         # Lazy statics
+thiserror = "1.0"          # Error handling
+
+[dev-dependencies]
+# Testing and benchmarking
+criterion = "0.5"          # Benchmarking
+proptest = "1.4"           # Property-based testing
+quickcheck = "1.0"         # Random test generation
+
+[lib]
+name = "riscv32i_sim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "riscv-sim"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

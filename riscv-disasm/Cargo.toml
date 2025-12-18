@@ -1,0 +1,11 @@
+[package]
+name = "riscv-disasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "RISC-V disassembler - converts machine code to assembly"
+
+[dependencies]
+riscv32i-sim = { path = "../alu" }
+thiserror.workspace = true
+colored.workspace = true

@@ -1,0 +1,32 @@
+[package]
+name = "riscv-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "CLI tools for RISC-V development and debugging"
+
+[dependencies]
+riscv32i-sim = { path = "../alu" }
+riscv-asm = { path = "../riscv-asm" }
+riscv-disasm = { path = "../riscv-disasm" }
+
+clap.workspace = true
+colored.workspace = true
+prettytable-rs.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "riscv-run"
+path = "src/bin/run.rs"
+
+[[bin]]
+name = "riscv-asm"
+path = "src/bin/asm.rs"
+
+[[bin]]
+name = "riscv-disasm"
+path = "src/bin/disasm.rs"
+
+[[bin]]
+name = "riscv-debug"
+path = "src/bin/debug.rs"

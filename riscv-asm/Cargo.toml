@@ -1,0 +1,15 @@
+[package]
+name = "riscv-asm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "RISC-V assembler - converts assembly code to machine code"
+
+[dependencies]
+riscv32i-sim = { path = "../alu" }
+thiserror.workspace = true
+nom.workspace = true
+once_cell.workspace = true
+
+[dev-dependencies]
+proptest = "1.4"

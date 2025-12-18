@@ -1,0 +1,27 @@
+[package]
+name = "riscv-examples"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Example RISC-V programs and demonstrations"
+publish = false
+
+[dependencies]
+riscv32i-sim = { path = "../alu" }
+riscv-disasm = { path = "../riscv-disasm" }
+
+[[example]]
+name = "fibonacci"
+path = "fibonacci.rs"
+
+[[example]]
+name = "bubble_sort"
+path = "bubble_sort.rs"
+
+[[example]]
+name = "factorial"
+path = "factorial.rs"
+
+[[example]]
+name = "hello_world"
+path = "hello_world.rs"

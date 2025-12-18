@@ -1,5 +1,9 @@
 <!-- @format -->
 
+Logisim Evolution then HDL Bits and EDA Playground,
+ModelSim/QuestaSim Intel FPGA Edition
+Yosys
+
 # What the Future might look like
 
 - 3D-Integration (Stacking)

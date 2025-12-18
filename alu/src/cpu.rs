@@ -2,18 +2,16 @@ use crate::types::*;
 use crate::memory::Memory;
 use crate::register_file::RegisterFile;
 use crate::control_unit::ControlUnit;
+use crate::alu::Alu;
 
-/// Top-level CPU module - integrates all submodules
-/// Like: module cpu(...); in SystemVerilog
+/// RISC-V CPU - integrates all submodules
+/// Implements RV32I base integer instruction set
 pub struct Cpu {
     // Submodules
     pub memory: Memory,
     pub registers: RegisterFile,
     pub control: ControlUnit,
-    
-    // ALU result and flags
-    alu_result: Logic32,
-    alu_flags: Flags,
+    pub alu: Alu,
     
     // Pipeline state
     cycle_count: u64,
@@ -25,86 +23,105 @@ impl Cpu {
             memory: Memory::new(),
             registers: RegisterFile::new(),
             control: ControlUnit::new(),
-            alu_result: 0,
-            alu_flags: Flags::new(),
+            alu: Alu::new(),
             cycle_count: 0,
         }
     }
 
-    /// ALU operation - combinational
-    fn execute_alu(&mut self, op: AluOp, a: Logic32, b: Logic32) {
-        let (result, carry, overflow) = match op {
-            AluOp::Nop => (a, false, false),
-            AluOp::Add => {
-                let (res, c) = a.overflowing_add(b);
-                let v = ((a ^ res) & (b ^ res)) & 0x8000_0000 != 0;
-                (res, c, v)
-            }
-            AluOp::Sub => {
-                let (res, c) = a.overflowing_sub(b);
-                let v = ((a ^ b) & (a ^ res)) & 0x8000_0000 != 0;
-                (res, c, v)
-            }
-            AluOp::And => (a & b, false, false),
-            AluOp::Or => (a | b, false, false),
-            AluOp::Xor => (a ^ b, false, false),
-            AluOp::Not => (!a, false, false),
-            AluOp::Shl => (a << (b & 0x1F), false, false),
-            AluOp::Shr => (a >> (b & 0x1F), false, false),
-        };
-
-        self.alu_result = result;
-        self.alu_flags.zero = result == 0;
-        self.alu_flags.carry = carry;
-        self.alu_flags.negative = (result & 0x8000_0000) != 0;
-        self.alu_flags.overflow = overflow;
-    }
-
-    /// Single clock cycle - like always @(posedge clk)
+    /// Single clock cycle - RISC-V fetch-decode-execute
     pub fn clock(&mut self) {
         self.cycle_count += 1;
 
-        // Fetch instruction from memory
+        // FETCH: Get instruction at PC
+        // RISC-V: PC is byte-addressed, instructions are 4-byte aligned
         let pc = self.control.get_pc();
-        self.memory.clock(true, false, pc, 0);
-        let instruction_word = self.memory.get_read_data();
-        
-        // Convert to instruction format
-        let instruction = Instruction {
-            opcode: (instruction_word & 0xFF) as Logic8,
-            address: ((instruction_word >> 8) & 0xFFFF) as Logic16,
-            flags: ((instruction_word >> 24) & 0x0F) as Bit4,
-        };
+        let instruction_word = self.memory.fetch(pc);
+        let inst = Instruction::new(instruction_word);
 
-        // Decode and generate control signals
-        self.control.clock(instruction, self.alu_flags);
+        // DECODE: Generate control signals
+        self.control.clock(inst);
         let ctrl = self.control.get_control_signals();
 
-        // Read registers
-        let rs1 = ((instruction.flags >> 0) & 0x0F) as u8;
-        let rs2 = ((instruction.flags >> 4) & 0x0F) as u8;
-        self.registers.clock(rs1, 0, false, rs2);
+        // READ REGISTERS: Read rs1 and rs2
+        let rs1 = inst.rs1();
+        let rs2 = inst.rs2();
+        let rd = inst.rd();
         
-        let operand_a = self.registers.get_read_data_a();
-        let operand_b = self.registers.get_read_data_b();
+        self.registers.clock(rs1, 0, false, rs2);
+        let rs1_data = self.registers.get_read_data_a();
+        let rs2_data = self.registers.get_read_data_b();
 
-        // Execute ALU operation
-        self.execute_alu(ctrl.alu_op, operand_a, operand_b);
+        // EXECUTE: ALU operation
+        let alu_operand_b = if ctrl.alu_src {
+            // Use immediate value
+            inst.imm_i() as Word
+        } else {
+            // Use rs2
+            rs2_data
+        };
 
-        // Memory access
+        // Special handling for AUIPC (add upper immediate to PC)
+        let alu_operand_a = if inst.opcode() == 0b0010111 {
+            pc  // AUIPC uses PC as operand A
+        } else if inst.opcode() == 0b0110111 {
+            0   // LUI uses 0 as operand A
+        } else {
+            rs1_data
+        };
+
+        let alu_result = self.alu.execute(ctrl.alu_op, alu_operand_a, alu_operand_b);
+
+        // MEMORY: Load/Store operations
+        let mut mem_data = 0;
         if ctrl.mem_read || ctrl.mem_write {
-            self.memory.clock(ctrl.mem_read, ctrl.mem_write, 
-                            self.alu_result, operand_b);
+            self.memory.clock(ctrl.mem_read, ctrl.mem_write, alu_result, rs2_data);
+            mem_data = self.memory.get_read_data();
         }
 
-        // Write back to register
+        // WRITE BACK: Write result to register
         if ctrl.reg_write {
-            let write_data = if ctrl.mem_read {
-                self.memory.get_read_data()
+            let write_data = if ctrl.mem_to_reg {
+                mem_data
+            } else if ctrl.jump {
+                // JAL/JALR: Save return address (PC + 4)
+                pc.wrapping_add(4)
             } else {
-                self.alu_result
+                alu_result
             };
-            self.registers.clock(rs1, write_data, true, 0);
+            
+            self.registers.clock(rd, write_data, true, 0);
+        }
+
+        // UPDATE PC
+        let branch_taken = self.should_branch(&inst, rs1_data, rs2_data);
+        let jump_target = self.calculate_jump_target(&inst, pc, rs1_data);
+        self.control.update_pc(branch_taken, jump_target);
+    }
+
+    /// Determine if branch should be taken (RISC-V branch conditions)
+    fn should_branch(&self, inst: &Instruction, rs1_data: Word, rs2_data: Word) -> bool {
+        if inst.opcode() != 0b1100011 {
+            return false;  // Not a branch instruction
+        }
+
+        match inst.funct3() {
+            0b000 => rs1_data == rs2_data,                  // BEQ
+            0b001 => rs1_data != rs2_data,                  // BNE
+            0b100 => (rs1_data as i32) < (rs2_data as i32), // BLT
+            0b101 => (rs1_data as i32) >= (rs2_data as i32),// BGE
+            0b110 => rs1_data < rs2_data,                   // BLTU
+            0b111 => rs1_data >= rs2_data,                  // BGEU
+            _ => false,
+        }
+    }
+
+    /// Calculate jump/branch target address
+    fn calculate_jump_target(&self, inst: &Instruction, pc: Addr, rs1_data: Word) -> Addr {
+        match inst.opcode() {
+            0b1101111 => pc.wrapping_add(inst.imm_j() as u32),        // JAL
+            0b1100111 => rs1_data.wrapping_add(inst.imm_i() as u32) & !1, // JALR (bit 0 = 0)
+            0b1100011 => pc.wrapping_add(inst.imm_b() as u32),        // Branch
+            _ => pc.wrapping_add(4),
         }
     }
 
@@ -119,14 +136,14 @@ impl Cpu {
     }
 
     pub fn reset(&mut self) {
-        self.control.set_pc(0);
+        self.control.reset();
+        self.registers.reset();
+        self.memory.reset();
         self.cycle_count = 0;
-        self.alu_result = 0;
-        self.alu_flags = Flags::new();
     }
 
-    /// Load program into instruction memory
-    pub fn load_program(&mut self, program: &[(usize, Logic32)]) {
+    /// Load RISC-V program into memory
+    pub fn load_program(&mut self, program: &[(Addr, Word)]) {
         self.memory.load_program(program);
     }
 }
